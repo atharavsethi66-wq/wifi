@@ -1,0 +1,11 @@
+[[permission]]
+identifier = "allow-login-wifi"
+description = "Enables login_wifi and secure storage commands"
+
+[permission.commands]
+allow = [
+  "login_wifi",
+  "get_saved_credentials",
+  "save_credentials",
+  "forget_credentials"
+]

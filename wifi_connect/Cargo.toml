@@ -1,0 +1,9 @@
+[package]
+name = "wifi_connect"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+quick-xml = "0.41.0"
+reqwest = { version = "0.13.4", features = ["rustls", "form"] }
+tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
