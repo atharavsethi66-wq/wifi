@@ -49,12 +49,8 @@ jobs:
 
       - name: Install Tauri CLI
         run: |
-          # 1. Dynamically extract the exact tauri crate version from Cargo.lock
-          TAURI_VERSION=$(grep -A 2 'name = "tauri"' src-tauri/Cargo.lock | grep 'version =' | head -n 1 | cut -d '"' -f 2)
-          echo "Detected Tauri crate version: $TAURI_VERSION"
-          
-          # 2. Install the exact same version of tauri-cli to guarantee compatibility
-          cargo install tauri-cli --version "$TAURI_VERSION"
+          # Install a Tauri CLI v2 version compatible with the project's Tauri packages.
+          cargo install tauri-cli --version 2.11.4 --locked
           cargo tauri --version
 
       - name: Clean Temporary Tauri State and Environment
