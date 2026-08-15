@@ -1,0 +1,109 @@
+name: Build iOS (Unsigned SideStore)
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Unsigned iOS App
+    runs-on: macos-14
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios, aarch64-apple-ios-sim
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            src-tauri/target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install cargo-binstall
+        run: |
+          curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install.sh | sh
+
+      - name: Install Tauri CLI
+        run: |
+          # Install the latest 2.x Tauri CLI compatible with the project's Tauri v2 packages.
+          cargo binstall tauri-cli@2 -y --force
+
+      - name: Initialize iOS Platform
+        run: |
+          # CI=true makes cargo tauri ios init run in non-interactive mode.
+          CI=true cargo tauri ios init
+
+      - name: Build iOS Application (Unsigned)
+        run: |
+          # Run the iOS build command with Xcode flags to skip signing.
+          # The -- separator allows forwarding Xcode build arguments directly.
+          cargo tauri ios build -- CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
+
+      - name: Locate and Package Artifacts
+        run: |
+          # 1. Dynamically find the built .app bundle in the build products folder.
+          # Xcode builds place the release product in a subfolder of Build/Products/Release-iphoneos/
+          APP_PATH=$(find src-tauri/gen/apple/build -path "*/Release-iphoneos/*.app" -type d | head -n 1)
+          
+          if [ -z "$APP_PATH" ]; then
+            echo "::error::Could not find the compiled .app bundle inside 'src-tauri/gen/apple/build'!"
+            exit 1
+          fi
+          
+          echo "Found compiled .app at: $APP_PATH"
+          
+          # Verify .app exists and contains files
+          if [ ! -d "$APP_PATH" ] || [ -z "$(ls -A "$APP_PATH")" ]; then
+            echo "::error::The .app bundle is empty or invalid!"
+            exit 1
+          fi
+          
+          # 2. Package .app into an unsigned .ipa container for SideStore
+          mkdir -p Payload
+          cp -r "$APP_PATH" Payload/
+          
+          # Verify Payload contains the app
+          APP_NAME=$(basename "$APP_PATH")
+          if [ ! -d "Payload/$APP_NAME" ]; then
+            echo "::error::Failed to copy .app bundle to Payload directory!"
+            exit 1
+          fi
+          
+          # Create zip archive (IPA) preserving symlinks
+          zip -y -r wifi-app-unsigned.ipa Payload
+          
+          # 3. Verify .ipa exists and is not empty
+          if [ ! -f wifi-app-unsigned.ipa ] || [ ! -s wifi-app-unsigned.ipa ]; then
+            echo "::error::The generated .ipa file is empty or missing!"
+            exit 1
+          fi
+          
+          echo "Successfully verified and packaged wifi-app-unsigned.ipa."
+          echo "APP_PATH=$APP_PATH" >> $GITHUB_ENV
+
+      - name: Upload Unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: wifi-app-unsigned-ipa
+          path: wifi-app-unsigned.ipa
+          if-no-files-found: error
+
+      - name: Upload raw .app Bundle (Fallback)
+        uses: actions/upload-artifact@v4
+        with:
+          name: wifi-app-bundle
+          path: ${{ env.APP_PATH }}
+          if-no-files-found: error
