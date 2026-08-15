@@ -32,14 +32,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - name: Install cargo-binstall
-        run: |
-          curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install.sh | sh
-
       - name: Install Tauri CLI
         run: |
-          # Install the latest 2.x Tauri CLI compatible with the project's Tauri v2 packages.
-          cargo binstall tauri-cli@2 -y --force
+          # Install the latest 2.x Tauri CLI compatible with the project's Tauri v2 packages directly using cargo.
+          cargo install tauri-cli --version "^2.0.0"
+          cargo tauri --version
 
       - name: Initialize iOS Platform
         run: |
