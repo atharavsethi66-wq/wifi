@@ -49,36 +49,113 @@ jobs:
 
       - name: Install Tauri CLI
         run: |
-          # Install the latest 2.x Tauri CLI compatible with the project's Tauri v2 packages directly using cargo.
-          cargo install tauri-cli --version "^2.0.0"
+          # 1. Dynamically extract the exact tauri crate version from Cargo.lock
+          TAURI_VERSION=$(grep -A 2 'name = "tauri"' src-tauri/Cargo.lock | grep 'version =' | head -n 1 | cut -d '"' -f 2)
+          echo "Detected Tauri crate version: $TAURI_VERSION"
+          
+          # 2. Install the exact same version of tauri-cli to guarantee compatibility
+          cargo install tauri-cli --version "$TAURI_VERSION"
           cargo tauri --version
+
+      - name: Clean Temporary Tauri State and Environment
+        run: |
+          echo "Cleaning temporary Tauri server address files..."
+          # Delete any stale server address files from common temporary directories
+          rm -f $TMPDIR/*_server-addr
+          rm -f /tmp/*_server-addr
+          rm -f $RUNNER_TEMP/*_server-addr
+          rm -f ~/Library/Caches/*-server-addr
+          rm -rf ~/Library/Application\ Support/tauri
+          rm -rf ~/Library/Caches/tauri
+          rm -rf ~/.config/tauri
+          rm -rf ~/.local/share/tauri
+          
+          # Unset conflicting Tauri environment variables and overrides
+          echo "Unsetting conflicting environment variables..."
+          unset $(env | grep -o '^TAURI_[^=]*') || true
+          unset PRODUCT_BUNDLE_IDENTIFIER
+          unset BUNDLE_IDENTIFIER
+          unset DEVELOPMENT_TEAM
+          unset PROVISIONING_PROFILE
 
       - name: Initialize iOS Platform
         run: |
           # CI=true makes cargo tauri ios init run in non-interactive mode.
           CI=true cargo tauri ios init
 
+      - name: Inspect and Verify Build Rust Code Script
+        run: |
+          PBXPROJ_PATH=$(find src-tauri/gen/apple -name "project.pbxproj" | head -n 1)
+          if [ -z "$PBXPROJ_PATH" ]; then
+            echo "::error::Could not find project.pbxproj file!"
+            exit 1
+          fi
+          
+          echo "Inspecting Build Rust Code script in project.pbxproj..."
+          grep -A 5 -B 2 "tauri ios xcode-script" "$PBXPROJ_PATH" || true
+          
+          # Get correct app identifier from tauri.conf.json
+          APP_IDENTIFIER=$(jq -r '.app.identifier // .identifier' src-tauri/tauri.conf.json)
+          echo "Expected App Identifier: $APP_IDENTIFIER"
+          
+          # Ensure there are no unexpected bundle ID references like com.immo.io
+          # (Perform a dynamic regex find-and-replace to clean up any incorrect placeholders)
+          echo "Ensuring project files match the correct app identifier..."
+          find src-tauri/gen/apple -type f -exec sed -i '' "s/com.immo.io/$APP_IDENTIFIER/g" {} + 2>/dev/null || true
+          find src-tauri/gen/apple -type f -exec sed -i '' "s/com.goor/$APP_IDENTIFIER/g" {} + 2>/dev/null || true
+          
+          # Verify that com.immo.io is not present in the generated files
+          if grep -q "com.immo.io" "$PBXPROJ_PATH"; then
+            echo "::error::Found unexpected reference to 'com.immo.io' in the generated Xcode project!"
+            exit 1
+          fi
+
       - name: Build iOS Application (Unsigned)
         run: |
-          # 1. Print Xcode version and developer directory
+          # 1. Locate Xcode project/workspace paths dynamically
+          WORKSPACE_PATH=$(find src-tauri/gen/apple -name "*.xcworkspace" | head -n 1)
+          PROJECT_PATH=$(find src-tauri/gen/apple -name "*.xcodeproj" | head -n 1)
+          PBXPROJ_PATH=$(find src-tauri/gen/apple -name "project.pbxproj" | head -n 1)
+          
+          # Determine correct project configuration paths
+          BUILD_TARGET_PATH=""
+          if [ -n "$WORKSPACE_PATH" ]; then
+            BUILD_TARGET_PATH="$WORKSPACE_PATH"
+          else
+            BUILD_TARGET_PATH="$PROJECT_PATH"
+          fi
+          
+          # 2. Print required diagnostics
+          echo "=== Xcode & Active Environment ==="
           xcodebuild -version
           xcode-select -p
           
-          # 2. Find Xcode project/workspace paths dynamically
-          WORKSPACE_PATH=$(find src-tauri/gen/apple -name "*.xcworkspace" | head -n 1)
+          echo "=== Tauri CLI Version ==="
+          cargo tauri --version || cargo-tauri --version || tauri --version || true
           
+          echo "=== Tauri Info ==="
+          cargo tauri info || true
+          
+          echo "=== Relevant Environment Variables ==="
+          env | grep TAURI_ || true
+          
+          echo "=== Generated Xcode Script Command ==="
+          if [ -n "$PBXPROJ_PATH" ]; then
+            grep -o 'tauri ios xcode-script[^"]*' "$PBXPROJ_PATH" || grep -o 'tauri ios xcode-script[^;]*' "$PBXPROJ_PATH" || true
+          else
+            echo "project.pbxproj not found"
+          fi
+          
+          # 3. Resolve scheme and execute xcodebuild
           if [ -z "$WORKSPACE_PATH" ]; then
-            PROJECT_PATH=$(find src-tauri/gen/apple -name "*.xcodeproj" | head -n 1)
             if [ -z "$PROJECT_PATH" ]; then
               echo "::error::Could not find any .xcodeproj or .xcworkspace file!"
               exit 1
             fi
             
-            # List schemes and find the iOS-specific one dynamically
+            # Find the iOS-specific scheme dynamically
             SCHEME_NAME=$(xcodebuild -list -project "$PROJECT_PATH" | sed -n '/Schemes:/,$p' | tail -n +2 | awk '{$1=$1;print}' | grep -i "ios" | head -n 1)
-            
             if [ -z "$SCHEME_NAME" ]; then
-              # Fallback to general schemes list
               SCHEME_NAME=$(xcodebuild -list -project "$PROJECT_PATH" | sed -n '/Schemes:/,$p' | tail -n +2 | awk '{$1=$1;print}' | head -n 1)
             fi
             
@@ -96,11 +173,9 @@ jobs:
               CODE_SIGNING_ALLOWED=NO \
               build
           else
-            # List schemes and find the iOS-specific one dynamically
+            # Find the iOS-specific scheme dynamically
             SCHEME_NAME=$(xcodebuild -list -workspace "$WORKSPACE_PATH" | sed -n '/Schemes:/,$p' | tail -n +2 | awk '{$1=$1;print}' | grep -i "ios" | head -n 1)
-            
             if [ -z "$SCHEME_NAME" ]; then
-              # Fallback to general schemes list
               SCHEME_NAME=$(xcodebuild -list -workspace "$WORKSPACE_PATH" | sed -n '/Schemes:/,$p' | tail -n +2 | awk '{$1=$1;print}' | head -n 1)
             fi
             
