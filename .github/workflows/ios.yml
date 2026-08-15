@@ -9,10 +9,25 @@ on:
 jobs:
   build:
     name: Build Unsigned iOS App
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Select Xcode Version
+        run: |
+          # Find available Xcode 16 paths and select the first one.
+          XCODE_PATH=$(find /Applications -maxdepth 1 -name "Xcode_16*.app" | head -n 1)
+          if [ -n "$XCODE_PATH" ]; then
+            echo "Selecting Xcode from: $XCODE_PATH"
+            sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
+          else
+            echo "Xcode 16 app not found, using default selected developer directory"
+          fi
+          
+          # Print the active Xcode version and path
+          xcodebuild -version
+          xcode-select -p
 
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
