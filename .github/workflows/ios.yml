@@ -60,9 +60,64 @@ jobs:
 
       - name: Build iOS Application (Unsigned)
         run: |
-          # Run the iOS build command with Xcode flags to skip signing.
-          # The -- separator allows forwarding Xcode build arguments directly.
-          cargo tauri ios build -- CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO -destination "generic/platform=iOS"
+          # 1. Print Xcode version and developer directory
+          xcodebuild -version
+          xcode-select -p
+          
+          # 2. Find Xcode project/workspace paths dynamically
+          WORKSPACE_PATH=$(find src-tauri/gen/apple -name "*.xcworkspace" | head -n 1)
+          
+          if [ -z "$WORKSPACE_PATH" ]; then
+            PROJECT_PATH=$(find src-tauri/gen/apple -name "*.xcodeproj" | head -n 1)
+            if [ -z "$PROJECT_PATH" ]; then
+              echo "::error::Could not find any .xcodeproj or .xcworkspace file!"
+              exit 1
+            fi
+            
+            # List schemes and find the iOS-specific one dynamically
+            SCHEME_NAME=$(xcodebuild -list -project "$PROJECT_PATH" | sed -n '/Schemes:/,$p' | tail -n +2 | awk '{$1=$1;print}' | grep -i "ios" | head -n 1)
+            
+            if [ -z "$SCHEME_NAME" ]; then
+              # Fallback to general schemes list
+              SCHEME_NAME=$(xcodebuild -list -project "$PROJECT_PATH" | sed -n '/Schemes:/,$p' | tail -n +2 | awk '{$1=$1;print}' | head -n 1)
+            fi
+            
+            echo "Executing xcodebuild command:"
+            echo "xcodebuild -project \"$PROJECT_PATH\" -scheme \"$SCHEME_NAME\" -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' CODE_SIGN_IDENTITY=\"\" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO build"
+            
+            xcodebuild \
+              -project "$PROJECT_PATH" \
+              -scheme "$SCHEME_NAME" \
+              -configuration Release \
+              -sdk iphoneos \
+              -destination 'generic/platform=iOS' \
+              CODE_SIGN_IDENTITY="" \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGNING_ALLOWED=NO \
+              build
+          else
+            # List schemes and find the iOS-specific one dynamically
+            SCHEME_NAME=$(xcodebuild -list -workspace "$WORKSPACE_PATH" | sed -n '/Schemes:/,$p' | tail -n +2 | awk '{$1=$1;print}' | grep -i "ios" | head -n 1)
+            
+            if [ -z "$SCHEME_NAME" ]; then
+              # Fallback to general schemes list
+              SCHEME_NAME=$(xcodebuild -list -workspace "$WORKSPACE_PATH" | sed -n '/Schemes:/,$p' | tail -n +2 | awk '{$1=$1;print}' | head -n 1)
+            fi
+            
+            echo "Executing xcodebuild command:"
+            echo "xcodebuild -workspace \"$WORKSPACE_PATH\" -scheme \"$SCHEME_NAME\" -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' CODE_SIGN_IDENTITY=\"\" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO build"
+            
+            xcodebuild \
+              -workspace "$WORKSPACE_PATH" \
+              -scheme "$SCHEME_NAME" \
+              -configuration Release \
+              -sdk iphoneos \
+              -destination 'generic/platform=iOS' \
+              CODE_SIGN_IDENTITY="" \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGNING_ALLOWED=NO \
+              build
+          fi
 
       - name: Locate and Package Artifacts
         run: |
