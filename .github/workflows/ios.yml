@@ -108,7 +108,18 @@ jobs:
 
       - name: Build iOS Application (Unsigned)
         run: |
-          # 1. Locate Xcode project/workspace paths dynamically
+          # 1. Start mock options server in the background to serve CliOptions to xcode-script
+          python3 .github/workflows/mock_options_server.py &
+          MOCK_SERVER_PID=$!
+          echo "Started mock options server with PID $MOCK_SERVER_PID"
+          
+          # Ensure mock options server is terminated on script exit
+          trap 'echo "Terminating mock options server..."; kill $MOCK_SERVER_PID || true' EXIT
+          
+          # Wait a brief moment for the server to spin up and create the server-addr files
+          sleep 2
+          
+          # 2. Locate Xcode project/workspace paths dynamically
           WORKSPACE_PATH=$(find src-tauri/gen/apple -name "*.xcworkspace" | head -n 1)
           PROJECT_PATH=$(find src-tauri/gen/apple -name "*.xcodeproj" | head -n 1)
           PBXPROJ_PATH=$(find src-tauri/gen/apple -name "project.pbxproj" | head -n 1)
@@ -121,7 +132,7 @@ jobs:
             BUILD_TARGET_PATH="$PROJECT_PATH"
           fi
           
-          # 2. Print required diagnostics
+          # 3. Print required diagnostics
           echo "=== Xcode & Active Environment ==="
           xcodebuild -version
           xcode-select -p
@@ -142,7 +153,7 @@ jobs:
             echo "project.pbxproj not found"
           fi
           
-          # 3. Resolve scheme and execute xcodebuild
+          # 4. Resolve scheme and execute xcodebuild
           if [ -z "$WORKSPACE_PATH" ]; then
             if [ -z "$PROJECT_PATH" ]; then
               echo "::error::Could not find any .xcodeproj or .xcworkspace file!"
