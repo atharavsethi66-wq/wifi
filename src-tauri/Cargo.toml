@@ -5,6 +5,10 @@ description = "Tauri WiFi Login Application"
 authors = ["atharav"]
 edition = "2021"
 
+[lib]
+name = "wifi_app"
+crate-type = ["staticlib", "cdylib", "lib"]
+
 [build-dependencies]
 tauri-build = { version = "2.0.0", features = [] }
 

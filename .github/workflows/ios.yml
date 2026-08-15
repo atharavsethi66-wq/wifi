@@ -108,7 +108,20 @@ jobs:
 
       - name: Build iOS Application (Unsigned)
         run: |
-          # 1. Start mock options server in the background to serve CliOptions to xcode-script
+          # 1. Compile the Rust library for the iOS target manually using Cargo
+          echo "Compiling Rust library for aarch64-apple-ios..."
+          cargo build --manifest-path src-tauri/Cargo.toml --lib --target aarch64-apple-ios --release
+          
+          # 2. Validate that the actual static library file was generated
+          LIB_PATH="src-tauri/target/aarch64-apple-ios/release/libwifi_app.a"
+          if [ -f "$LIB_PATH" ]; then
+            echo "Successfully generated and verified static library at: $LIB_PATH"
+          else
+            echo "::error::Static library not found at $LIB_PATH after compilation!"
+            exit 1
+          fi
+          
+          # 3. Start mock options server in the background to serve CliOptions to xcode-script
           python3 .github/workflows/mock_options_server.py &
           MOCK_SERVER_PID=$!
           echo "Started mock options server with PID $MOCK_SERVER_PID"
@@ -119,7 +132,7 @@ jobs:
           # Wait a brief moment for the server to spin up and create the server-addr files
           sleep 2
           
-          # 2. Locate Xcode project/workspace paths dynamically
+          # 4. Locate Xcode project/workspace paths dynamically
           WORKSPACE_PATH=$(find src-tauri/gen/apple -name "*.xcworkspace" | head -n 1)
           PROJECT_PATH=$(find src-tauri/gen/apple -name "*.xcodeproj" | head -n 1)
           PBXPROJ_PATH=$(find src-tauri/gen/apple -name "project.pbxproj" | head -n 1)
@@ -132,7 +145,7 @@ jobs:
             BUILD_TARGET_PATH="$PROJECT_PATH"
           fi
           
-          # 3. Print required diagnostics
+          # 5. Print required diagnostics
           echo "=== Xcode & Active Environment ==="
           xcodebuild -version
           xcode-select -p
@@ -153,7 +166,7 @@ jobs:
             echo "project.pbxproj not found"
           fi
           
-          # 4. Resolve scheme and execute xcodebuild
+          # 6. Resolve scheme and execute xcodebuild using lowercase 'release' configuration
           if [ -z "$WORKSPACE_PATH" ]; then
             if [ -z "$PROJECT_PATH" ]; then
               echo "::error::Could not find any .xcodeproj or .xcworkspace file!"
@@ -167,12 +180,12 @@ jobs:
             fi
             
             echo "Executing xcodebuild command:"
-            echo "xcodebuild -project \"$PROJECT_PATH\" -scheme \"$SCHEME_NAME\" -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' CODE_SIGN_IDENTITY=\"\" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO build"
+            echo "xcodebuild -project \"$PROJECT_PATH\" -scheme \"$SCHEME_NAME\" -configuration release -sdk iphoneos -destination 'generic/platform=iOS' CODE_SIGN_IDENTITY=\"\" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO build"
             
             xcodebuild \
               -project "$PROJECT_PATH" \
               -scheme "$SCHEME_NAME" \
-              -configuration Release \
+              -configuration release \
               -sdk iphoneos \
               -destination 'generic/platform=iOS' \
               CODE_SIGN_IDENTITY="" \
@@ -187,12 +200,12 @@ jobs:
             fi
             
             echo "Executing xcodebuild command:"
-            echo "xcodebuild -workspace \"$WORKSPACE_PATH\" -scheme \"$SCHEME_NAME\" -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' CODE_SIGN_IDENTITY=\"\" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO build"
+            echo "xcodebuild -workspace \"$WORKSPACE_PATH\" -scheme \"$SCHEME_NAME\" -configuration release -sdk iphoneos -destination 'generic/platform=iOS' CODE_SIGN_IDENTITY=\"\" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO build"
             
             xcodebuild \
               -workspace "$WORKSPACE_PATH" \
               -scheme "$SCHEME_NAME" \
-              -configuration Release \
+              -configuration release \
               -sdk iphoneos \
               -destination 'generic/platform=iOS' \
               CODE_SIGN_IDENTITY="" \
@@ -204,8 +217,8 @@ jobs:
       - name: Locate and Package Artifacts
         run: |
           # 1. Dynamically find the built .app bundle in the build products folder.
-          # Xcode builds place the release product in a subfolder of Build/Products/Release-iphoneos/
-          APP_PATH=$(find src-tauri/gen/apple/build -path "*/Release-iphoneos/*.app" -type d | head -n 1)
+          # Xcode builds place the release product in a subfolder of Build/Products/*-iphoneos/
+          APP_PATH=$(find src-tauri/gen/apple/build -path "*/*-iphoneos/*.app" -type d | head -n 1)
           
           if [ -z "$APP_PATH" ]; then
             echo "::error::Could not find the compiled .app bundle inside 'src-tauri/gen/apple/build'!"
